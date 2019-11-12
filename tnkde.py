@@ -6,6 +6,7 @@
 from functools import partial
 from scipy.stats import truncnorm
 from sklearn.base import BaseEstimator
+from scipy.special import logsumexp
 import numpy as np
 
 
@@ -24,9 +25,9 @@ class TruncatedNormalKernelDensity(BaseEstimator):
         The upper-bound of the support.
     """
     def __init__(self,
-                 bandwidth : float = 1.0,
-                 lowerbound : float = -np.inf,
-                 upperbound : float = np.inf):
+                 bandwidth: float = 1.0,
+                 lowerbound: float = -np.inf,
+                 upperbound: float = np.inf):
 
         self.bandwidth = bandwidth
         self.lowerbound = lowerbound
@@ -35,6 +36,9 @@ class TruncatedNormalKernelDensity(BaseEstimator):
         if not bandwidth > 0:
             raise ValueError("Bandwidth must be positive.")
 
+        if upperbound < lowerbound:
+            raise ValueError(f"Upperbound (got {upperbound}) can't be lower than lowerbound (got {lowerbound})!")
+
     def fit(self, X, y=None, sample_weight=None):
         """Fit the Kernel Density model on the data.
 
@@ -42,6 +46,7 @@ class TruncatedNormalKernelDensity(BaseEstimator):
         ----------
         X : array_like, shape (n_samples,)
             list of data points.
+        y : not used.
         sample_weight : array_like, shape (n_samples,), optional
             list of sample weights attached to data X.
         """
@@ -54,16 +59,67 @@ class TruncatedNormalKernelDensity(BaseEstimator):
             # TODO Checks
             weights = sample_weight
 
-        self.weights_ = weights
-        self.normalizer_ = sum(weights)
+        self.log_weights_ = np.log(weights)
+        self.log_normalizer_ = np.log(sum(weights))
         self.lowers_ = (self.lowerbound - self.points_) / self.bandwidth
         self.uppers_ = (self.upperbound - self.points_) / self.bandwidth
 
         return self
 
     def score_samples(self, X):
+        # TODO Array shape check
+        samples = X.reshape(-1)
         return(
-            sum([truncnorm.logpdf(X-mean, lower, upper) * weight for
-                 (mean, lower, upper, weight) in
-                 zip(self.points_, self.lowers_, self.uppers_, self.weights_)]
-                ) / self.normalizer_)
+            logsumexp([truncnorm.logpdf((samples - mean)/self.bandwidth, lower, upper) + log_weight for
+                       (mean, lower, upper, log_weight) in
+                       zip(self.points_, self.lowers_, self.uppers_, self.log_weights_)],
+                      axis=0,
+                      return_sign=False) - self.log_normalizer_)
+
+
+# Test script
+if __name__ == "__main__":
+
+    from sklearn.neighbors import KernelDensity
+
+    print("Training set:")
+    x = np.random.normal(0, 10, 10).reshape(-1, 1)
+    print(x)
+
+    print("Test set:")
+    y = np.random.normal(0, 100, 8).reshape(-1, 1)
+    print(y)
+
+    print("Kernel bandwidth:")
+    bw = np.random.uniform(1, 5)
+    print(bw)
+
+    print("Our KDE:")
+    my_kde = TruncatedNormalKernelDensity(bandwidth=bw)
+    my_kde.fit(x)
+    print(my_kde.score_samples(y))
+
+    print("SciKitLearn KDE:")
+    skl_kde = KernelDensity(kernel='gaussian', bandwidth=bw)
+    skl_kde.fit(x)
+    print(skl_kde.score_samples(y))
+
+    print("Test that truncation works:")
+    y_vals = sorted(y)
+    up = y_vals[5]
+    low = y_vals[2]
+
+    print(f"With upperbound {up}:")
+    up_kde = TruncatedNormalKernelDensity(bandwidth=bw, upperbound=up)
+    up_kde.fit(x)
+    print(up_kde.score_samples(y))
+
+    print(f"With lowerbound {low}:")
+    low_kde = TruncatedNormalKernelDensity(bandwidth=bw, lowerbound=low)
+    low_kde.fit(x)
+    print(low_kde.score_samples(y))
+
+    print(f"With upperbound {up} and lowerbound {low}:")
+    both_kde = TruncatedNormalKernelDensity(bandwidth=bw, upperbound=up, lowerbound=low)
+    both_kde.fit(x)
+    print(both_kde.score_samples(y))
