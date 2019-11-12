@@ -3,7 +3,6 @@
 # Licensed under the BSD 3-Clause License
 # Copyright (c) 2019, Yuriy Sverchkov
 
-from functools import partial
 from scipy.stats import truncnorm
 from sklearn.base import BaseEstimator
 from scipy.special import logsumexp
@@ -70,11 +69,14 @@ class TruncatedNormalKernelDensity(BaseEstimator):
         # TODO Array shape check
         samples = X.reshape(-1)
         return(
-            logsumexp([truncnorm.logpdf((samples - mean)/self.bandwidth, lower, upper) + log_weight for
+            logsumexp([truncnorm.logpdf(samples, a=lower, b=upper, loc=mean, scale=self.bandwidth) + log_weight for
                        (mean, lower, upper, log_weight) in
                        zip(self.points_, self.lowers_, self.uppers_, self.log_weights_)],
                       axis=0,
                       return_sign=False) - self.log_normalizer_)
+
+    def score(self, X):
+        return(sum(self.score_samples(X)))
 
 
 # Test script
@@ -98,11 +100,13 @@ if __name__ == "__main__":
     my_kde = TruncatedNormalKernelDensity(bandwidth=bw)
     my_kde.fit(x)
     print(my_kde.score_samples(y))
+    print(my_kde.score(y))
 
     print("SciKitLearn KDE:")
     skl_kde = KernelDensity(kernel='gaussian', bandwidth=bw)
     skl_kde.fit(x)
     print(skl_kde.score_samples(y))
+    print(skl_kde.score(y))
 
     print("Test that truncation works:")
     y_vals = sorted(y)
