@@ -3,8 +3,9 @@
 # Licensed under the BSD 3-Clause License
 # Copyright (c) 2019, Yuriy Sverchkov
 
-from scipy.stats import truncnorm
+from scipy.stats import truncnorm, multinomial
 from sklearn.base import BaseEstimator
+from sklearn.utils import check_random_state
 from scipy.special import logsumexp
 import numpy as np
 
@@ -78,11 +79,33 @@ class TruncatedNormalKernelDensity(BaseEstimator):
     def score(self, X):
         return(sum(self.score_samples(X)))
 
+    def sample(self, n_samples=1, random_state=None):
+
+        rng = check_random_state(random_state)
+
+        using_points = rng.choice(
+            a=len(self.points_),
+            p=np.exp(self.log_weights_ - self.log_normalizer_).reshape(-1),
+            size=n_samples,
+            replace=True)
+
+        samples = truncnorm.rvs(
+            a=self.lowers_[using_points],
+            b=self.uppers_[using_points],
+            loc=self.points_[using_points],
+            scale=self.bandwidth,
+            #size=,
+            random_state=rng
+        )
+
+        return(samples)
+
 
 # Test script
 if __name__ == "__main__":
 
     from sklearn.neighbors import KernelDensity
+    import plotly.graph_objects as go
 
     print("Training set:")
     x = np.random.normal(0, 10, 10).reshape(-1, 1)
@@ -127,3 +150,13 @@ if __name__ == "__main__":
     both_kde = TruncatedNormalKernelDensity(bandwidth=bw, upperbound=up, lowerbound=low)
     both_kde.fit(x)
     print(both_kde.score_samples(y))
+
+    plot_x = np.linspace(start=(up+low)/2-(up-low), stop=(up+low)/2+(up-low), num=100).reshape(-1)
+    plot_y = np.exp(both_kde.score_samples(plot_x)).reshape(-1)
+    sample_points = both_kde.sample(50).reshape(-1)
+    fig = go.Figure([
+        go.Scatter(x=plot_x, y=plot_y, mode='lines', name='pdf'),
+        go.Box(x=sample_points, boxpoints='all', jitter=0.3, pointpos=-0.4)
+    ])
+
+    fig.write_html('figure.html', auto_open=True)
